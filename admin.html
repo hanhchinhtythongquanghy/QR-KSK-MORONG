@@ -1,0 +1,287 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Quản trị hệ thống - Tiếp đón khám sức khỏe</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<script src="https://unpkg.com/@supabase/supabase-js@2"></script>
+<script src="config.js"></script>
+<style>
+  :root {
+    --navy: #1c3d5a;
+    --navy-dark: #14293c;
+    --accent: #b8860b;
+    --bg: #f3f5f7;
+    --panel: #ffffff;
+    --border: #d7dde3;
+    --text: #1f2937;
+    --muted: #64748b;
+    --ok: #1a7f4e;
+    --err: #c0392b;
+    --warn: #b8860b;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; font-family: 'Inter', sans-serif; background: var(--bg); color: var(--text); }
+
+  /* ---------- Đăng nhập ---------- */
+  #login-screen {
+    min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: 20px;
+  }
+  .login-box {
+    background: var(--panel); border: 1px solid var(--border); border-radius: 12px;
+    padding: 32px; width: 100%; max-width: 360px; text-align: center;
+  }
+  .login-logo { font-size: 34px; margin-bottom: 6px; }
+  .login-box h2 { margin: 0 0 4px; color: var(--navy-dark); }
+  .login-sub { color: var(--muted); font-size: 13.5px; margin: 0 0 20px; }
+  .login-box .field { text-align: left; margin-bottom: 12px; }
+  .login-box .field label { font-size: 13px; color: var(--muted); margin-bottom: 4px; display: block; }
+  .login-box .field input {
+    width: 100%; padding: 10px 12px; border: 1px solid var(--border); border-radius: 6px; font-size: 14px;
+  }
+  .login-error, .banner-error { color: var(--err); font-size: 13px; min-height: 1em; margin: 6px 0 10px; }
+  .login-submit { width: 100%; margin-top: 6px; }
+
+  /* ---------- Nút chung ---------- */
+  .btn {
+    background: var(--navy); color: #fff; border: none; padding: 10px 18px;
+    border-radius: 6px; font-size: 14px; font-weight: 600; cursor: pointer;
+  }
+  .btn:hover { background: var(--navy-dark); }
+  .btn:disabled { opacity: .6; cursor: default; }
+  .btn.secondary { background: #fff; color: var(--navy); border: 1px solid var(--border); }
+  .btn.danger { background: #fff; color: var(--err); border: 1px solid var(--err); }
+  .btn.small { padding: 6px 12px; font-size: 12.5px; }
+
+  /* ---------- Layout ---------- */
+  header {
+    background: var(--navy); color: #fff; padding: 14px 24px;
+    display: flex; align-items: center; justify-content: space-between;
+  }
+  header .title { font-weight: 700; font-size: 17px; }
+  header .title small { display: block; font-weight: 400; font-size: 12px; color: #cbd8e4; }
+  main { padding: 28px; max-width: 1280px; margin: 0 auto; }
+
+  /* ---------- KPI cards ---------- */
+  .kpi-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 14px; margin-bottom: 24px; }
+  .kpi-card { background: var(--panel); border: 1px solid var(--border); border-radius: 10px; padding: 16px 18px; }
+  .kpi-card .kpi-label { font-size: 12.5px; color: var(--muted); margin-bottom: 6px; }
+  .kpi-card .kpi-value { font-size: 26px; font-weight: 700; color: var(--navy-dark); }
+
+  /* ---------- Toolbar ---------- */
+  .toolbar-row { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-bottom: 16px; flex-wrap: wrap; }
+  .toolbar-row input[type=text] {
+    padding: 9px 12px; border: 1px solid var(--border); border-radius: 6px; font-size: 14px; min-width: 260px;
+  }
+
+  /* ---------- Bảng ---------- */
+  .table-wrap { overflow-x: auto; border-radius: 8px; background: var(--panel); border: 1px solid var(--border); }
+  table { width: 100%; border-collapse: collapse; }
+  thead th {
+    background: var(--navy); color: #fff; text-align: left; font-size: 12px;
+    padding: 10px 12px; font-weight: 600; text-transform: uppercase; letter-spacing: .03em; white-space: nowrap;
+  }
+  tbody td { padding: 10px 12px; border-bottom: 1px solid var(--border); font-size: 13.5px; vertical-align: top; }
+  tbody tr:last-child td { border-bottom: none; }
+  tbody tr:hover { background: #f3f7fb; }
+  .muted { color: var(--muted); }
+  .badge-idle { display: inline-block; padding: 2px 8px; border-radius: 100px; font-size: 11.5px; background: #fdf1e2; color: var(--warn); }
+  .badge-active { display: inline-block; padding: 2px 8px; border-radius: 100px; font-size: 11.5px; background: #e5f4ec; color: var(--ok); }
+  .row-actions { display: flex; gap: 6px; flex-wrap: wrap; }
+  .empty-state { padding: 40px; text-align: center; color: var(--muted); }
+
+  /* ---------- Modal ---------- */
+  .modal { display: none; position: fixed; inset: 0; background: rgba(20,41,60,.55); align-items: center; justify-content: center; z-index: 50; padding: 16px; }
+  .modal-box { background: var(--panel); border-radius: 12px; padding: 26px; width: 100%; max-width: 460px; max-height: 88vh; overflow-y: auto; }
+  .modal-box.wide { max-width: 600px; }
+  .modal-box h3 { margin-top: 0; color: var(--navy-dark); }
+  .field { margin-bottom: 12px; }
+  .field label { display: block; font-size: 13px; color: var(--muted); margin-bottom: 4px; }
+  .field input, .field textarea {
+    width: 100%; padding: 8px 10px; border: 1px solid var(--border); border-radius: 6px; font-size: 14px; font-family: inherit;
+  }
+  .field textarea { resize: vertical; min-height: 90px; }
+  .hint { font-size: 12.5px; color: var(--muted); margin-bottom: 12px; }
+  .modal-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 18px; }
+  .modal-error { color: var(--err); font-size: 13px; margin-top: 6px; min-height: 1em; }
+
+  .account-row { display: flex; justify-content: space-between; align-items: center; padding: 8px 0; border-bottom: 1px solid var(--border); font-size: 13.5px; }
+  .account-row:last-child { border-bottom: none; }
+  .account-row .uid { font-family: monospace; font-size: 12px; color: var(--muted); word-break: break-all; }
+  .account-add-row { display: flex; gap: 8px; margin-top: 14px; }
+  .account-add-row input { flex: 1; }
+
+  .toast {
+    position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%) translateY(20px);
+    background: var(--navy-dark); color: #fff; padding: 12px 20px; border-radius: 8px;
+    font-size: 14px; opacity: 0; pointer-events: none; transition: opacity .25s, transform .25s; z-index: 100;
+  }
+  .toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+  .toast.ok { background: var(--ok); }
+  .toast.err { background: var(--err); }
+</style>
+</head>
+<body>
+
+<!-- ============ MÀN HÌNH ĐĂNG NHẬP ============ -->
+<div id="login-screen">
+  <div class="login-box">
+    <div class="login-logo">🛠️</div>
+    <h2>Quản trị hệ thống</h2>
+    <p class="login-sub">Đăng nhập bằng tài khoản quản trị</p>
+    <form id="login-form">
+      <div class="field">
+        <label>Email</label>
+        <input type="email" name="email" id="login-email" autocomplete="username" required />
+      </div>
+      <div class="field">
+        <label>Mật khẩu</label>
+        <input type="password" name="password" id="login-password" autocomplete="current-password" required />
+      </div>
+      <div class="login-error" id="login-error"></div>
+      <button type="submit" class="btn login-submit" id="login-submit">Đăng nhập</button>
+    </form>
+  </div>
+</div>
+
+<!-- ============ TRANG QUẢN TRỊ ============ -->
+<div id="app-shell" style="display:none">
+
+  <header>
+    <div class="title">
+      Quản trị hệ thống
+      <small>Tiếp đón khám sức khỏe — nhiều trạm y tế</small>
+    </div>
+    <button class="btn secondary" id="btn-logout">⏻ Đăng xuất</button>
+  </header>
+
+  <main>
+    <div class="kpi-grid">
+      <div class="kpi-card">
+        <div class="kpi-label">Tổng số trạm y tế</div>
+        <div class="kpi-value" id="kpi-so-tram">—</div>
+      </div>
+      <div class="kpi-card">
+        <div class="kpi-label">Tổng số lượt tiếp đón</div>
+        <div class="kpi-value" id="kpi-tong-nhap">—</div>
+      </div>
+      <div class="kpi-card">
+        <div class="kpi-label">Lượt tiếp đón hôm nay</div>
+        <div class="kpi-value" id="kpi-hom-nay">—</div>
+      </div>
+      <div class="kpi-card">
+        <div class="kpi-label">Trạm hoạt động 7 ngày qua</div>
+        <div class="kpi-value" id="kpi-hoat-dong">—</div>
+      </div>
+    </div>
+
+    <div class="toolbar-row">
+      <input type="text" id="search-box" placeholder="Tìm theo tên trạm, tên xã..." />
+      <button class="btn" id="btn-add-tram">+ Thêm trạm mới</button>
+    </div>
+
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>Trạm y tế</th>
+            <th>Tên xã (in phiếu)</th>
+            <th>Số tài khoản</th>
+            <th>Tổng lượt nhập</th>
+            <th>Hôm nay</th>
+            <th>Lần cuối sử dụng</th>
+            <th>Ngày tạo</th>
+            <th>Trạng thái</th>
+            <th>Thao tác</th>
+          </tr>
+        </thead>
+        <tbody id="tram-table-body"></tbody>
+      </table>
+      <div class="empty-state" id="empty-state" style="display:none">Chưa có trạm y tế nào — bấm "+ Thêm trạm mới" để bắt đầu.</div>
+    </div>
+  </main>
+</div>
+
+<!-- ============ MODAL THÊM / SỬA TRẠM ============ -->
+<div class="modal" id="tram-modal">
+  <div class="modal-box">
+    <h3 id="tram-modal-title">Thêm trạm y tế mới</h3>
+    <form id="tram-form">
+      <div class="field">
+        <label>Tên xã/phường (in trên phiếu, ví dụ: UBND XÃ HỒNG QUANG)</label>
+        <input name="ten_xa" id="field-ten-xa" required />
+      </div>
+      <div class="field">
+        <label>Tên trạm y tế (in trên phiếu, ví dụ: TRẠM Y TẾ XÃ HỒNG QUANG)</label>
+        <input name="ten_tram" id="field-ten-tram" required />
+      </div>
+      <div class="field">
+        <label>Danh sách người quét ban đầu (mỗi dòng một người, có thể để trống — trạm tự bổ sung sau)</label>
+        <textarea name="danh_sach_nguoi_quet" id="field-danh-sach-nguoi-quet" rows="4"
+          placeholder="Nguyễn Thị A&#10;Trần Văn B"></textarea>
+      </div>
+      <!-- Chỉ hiện khi THÊM trạm mới: tạo luôn tài khoản đăng nhập đầu tiên cho trạm -->
+      <div id="tram-modal-account-fields">
+        <div class="field">
+          <label>Email đăng nhập cho trạm (tài khoản dùng chung)</label>
+          <input type="email" name="email" id="field-tram-email" autocomplete="off" />
+        </div>
+        <div class="field">
+          <label>Mật khẩu (tối thiểu 6 ký tự)</label>
+          <input type="password" name="password" id="field-tram-password" autocomplete="new-password" />
+        </div>
+      </div>
+      <div class="modal-error" id="tram-modal-error"></div>
+      <div class="modal-actions">
+        <button type="button" class="btn secondary" id="btn-close-tram-modal">Hủy</button>
+        <button type="submit" class="btn" id="tram-modal-submit">Lưu</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<!-- ============ MODAL QUẢN LÝ TÀI KHOẢN CỦA 1 TRẠM ============ -->
+<div class="modal" id="accounts-modal">
+  <div class="modal-box wide">
+    <h3>Tài khoản đăng nhập — <span id="accounts-modal-tram-name"></span></h3>
+    <div class="hint">Mỗi trạm có thể dùng chung 1 hoặc nhiều tài khoản đăng nhập.</div>
+    <div id="accounts-list"></div>
+    <form id="add-account-form" class="account-add-row">
+      <input type="email" id="field-new-account-email" placeholder="Email tài khoản mới" required />
+      <input type="password" id="field-new-account-password" placeholder="Mật khẩu (tối thiểu 6 ký tự)" required />
+      <button type="submit" class="btn small" id="btn-add-account">Tạo tài khoản</button>
+    </form>
+    <div class="modal-error" id="accounts-modal-error"></div>
+    <div class="modal-actions">
+      <button type="button" class="btn secondary" id="btn-close-accounts-modal">Đóng</button>
+    </div>
+  </div>
+</div>
+
+<!-- ============ MODAL XÁC NHẬN XÓA TRẠM ============ -->
+<div class="modal" id="delete-modal">
+  <div class="modal-box">
+    <h3>Xóa trạm y tế?</h3>
+    <p class="hint">
+      Thao tác này sẽ xóa vĩnh viễn trạm <b id="delete-tram-name"></b> cùng
+      <b>toàn bộ dữ liệu tiếp đón và tài khoản</b> đang gắn với trạm này. Không thể hoàn tác.
+    </p>
+    <div class="field">
+      <label>Gõ lại đúng tên trạm để xác nhận</label>
+      <input type="text" id="field-delete-confirm" />
+    </div>
+    <div class="modal-error" id="delete-modal-error"></div>
+    <div class="modal-actions">
+      <button type="button" class="btn secondary" id="btn-close-delete-modal">Hủy</button>
+      <button type="button" class="btn danger" id="btn-confirm-delete">Xóa vĩnh viễn</button>
+    </div>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script src="admin.js"></script>
+</body>
+</html>

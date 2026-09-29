@@ -1,0 +1,9 @@
+{
+  "name": "tiep-don-kham-suc-khoe",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Hệ thống tiếp đón khám sức khỏe đa trạm y tế (SaaS) - static site + serverless functions (Vercel)",
+  "dependencies": {
+    "@supabase/supabase-js": "^2.45.0"
+  }
+}
