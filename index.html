@@ -239,6 +239,22 @@
   }
   .list-controls label { font-size: 13px; color: var(--muted); display: flex; align-items: center; gap: 6px; }
 
+  /* Bộ lọc thời gian nhanh */
+  .range-bar { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 10px; }
+  .range-btn {
+    padding: 7px 14px; border: 1px solid var(--border); border-radius: 999px; background: #fff;
+    color: var(--navy); font-size: 13px; cursor: pointer; font-weight: 500;
+  }
+  .range-btn:hover { background: #f3f7fb; }
+  .range-btn.active { background: var(--navy); color: #fff; border-color: var(--navy); }
+  .range-custom { display: none; gap: 8px; align-items: center; flex-wrap: wrap; margin-bottom: 10px; font-size: 13px; color: var(--muted); }
+  .range-custom.show { display: flex; }
+  .range-custom input[type=date] { padding: 8px 10px; border: 1px solid var(--border); border-radius: 6px; font-size: 14px; }
+  .list-summary { font-size: 13px; color: var(--muted); margin-bottom: 10px; }
+  .list-summary b { color: var(--navy); }
+  .list-msg { padding: 24px 12px; text-align: center; color: var(--muted); font-size: 14px; }
+  .list-msg.err { color: #c0392b; }
+
   .table-wrap { overflow-x: auto; -webkit-overflow-scrolling: touch; border-radius: 8px; }
   table { width: 100%; border-collapse: collapse; background: var(--panel); border-radius: 8px; overflow: hidden; }
   thead th {
@@ -425,6 +441,7 @@
       width: 100%; min-width: 0 !important;
     }
     .hint { font-size: 11.5px; }
+    .range-custom input[type=date] { flex: 1; min-width: 0; }
   }
 </style>
 </head>
@@ -516,11 +533,23 @@
   <!-- ============ TRANG 2: DANH SÁCH ============ -->
   <section class="page" id="page-list">
     <p class="hint">Bấm vào một dòng để copy mã QR (dán sang phần mềm V20) — dòng đó sẽ tự ẩn sau 2 giây và đánh dấu đã bàn giao.</p>
+    <div class="range-bar" id="range-bar">
+      <button type="button" class="range-btn active" data-range="today">Hôm nay</button>
+      <button type="button" class="range-btn" data-range="yesterday">Hôm qua</button>
+      <button type="button" class="range-btn" data-range="7d">7 ngày nay</button>
+      <button type="button" class="range-btn" data-range="30d">1 tháng nay</button>
+      <button type="button" class="range-btn" data-range="custom">Khoảng thời gian</button>
+      <button type="button" class="range-btn" data-range="all">Tất cả</button>
+    </div>
+    <div class="range-custom" id="range-custom">
+      <span>Từ ngày</span><input type="date" id="filter-from" />
+      <span>đến ngày</span><input type="date" id="filter-to" />
+    </div>
     <div class="list-controls">
-      <input type="date" id="filter-date" />
       <input type="text" id="search-box" placeholder="Tìm theo tên, CCCD, địa chỉ..." style="min-width:260px" />
       <label><input type="checkbox" id="toggle-hide-exported" checked /> Ẩn những người đã bàn giao V20</label>
     </div>
+    <div class="list-summary" id="list-summary"></div>
     <div class="table-wrap">
       <table>
         <thead>
