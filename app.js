@@ -72,6 +72,7 @@ async function showApp() {
   if (loginScreenEl) loginScreenEl.style.display = "none";
   if (appShellEl) appShellEl.style.display = "";
   await loadTramConfig();
+  if (currentTram && document.getElementById("page-list")?.classList.contains("active")) loadList();
 }
 
 function showLogin() {
@@ -976,36 +977,126 @@ window.addEventListener("beforeunload", stopCameraScan);
 
 let allRows = [];
 let hideExported = true;
+let currentRange = "today"; // today | yesterday | 7d | 30d | custom | all
+let loadListSeq = 0; // chống ghi đè khi bấm lọc liên tiếp
+
+// ---------- Tiện ích ngày theo GIỜ VIỆT NAM (UTC+7), không phụ thuộc múi giờ máy ----------
+const VN_OFFSET_MS = 7 * 60 * 60 * 1000;
+
+// Trả về chuỗi YYYY-MM-DD của ngày hiện tại theo giờ VN, cộng thêm offsetDays ngày
+function vnDateStr(offsetDays = 0) {
+  const t = new Date(Date.now() + VN_OFFSET_MS + offsetDays * 86400000);
+  return t.toISOString().slice(0, 10);
+}
+
+// Cộng/trừ ngày cho chuỗi YYYY-MM-DD
+function addDaysStr(dateStr, n) {
+  const t = new Date(`${dateStr}T00:00:00Z`);
+  t.setUTCDate(t.getUTCDate() + n);
+  return t.toISOString().slice(0, 10);
+}
+
+function fmtDMY(dateStr) {
+  const [y, m, d] = dateStr.split("-");
+  return `${d}/${m}/${y}`;
+}
+
+// Tính khoảng [from, to] (YYYY-MM-DD, gồm cả 2 đầu) theo lựa chọn hiện tại
+function getRangeDates() {
+  const today = vnDateStr(0);
+  switch (currentRange) {
+    case "today": return { from: today, to: today, label: `Hôm nay (${fmtDMY(today)})` };
+    case "yesterday": {
+      const y = vnDateStr(-1);
+      return { from: y, to: y, label: `Hôm qua (${fmtDMY(y)})` };
+    }
+    case "7d": {
+      const f = vnDateStr(-6);
+      return { from: f, to: today, label: `7 ngày nay (${fmtDMY(f)} – ${fmtDMY(today)})` };
+    }
+    case "30d": {
+      const f = vnDateStr(-29);
+      return { from: f, to: today, label: `1 tháng nay (${fmtDMY(f)} – ${fmtDMY(today)})` };
+    }
+    case "custom": {
+      let f = document.getElementById("filter-from").value;
+      let t = document.getElementById("filter-to").value;
+      if (!f && !t) return { from: null, to: null, label: "Khoảng thời gian: chọn ngày bắt đầu/kết thúc", incomplete: true };
+      if (f && t && f > t) [f, t] = [t, f]; // người dùng chọn ngược -> tự đảo
+      const label = `Từ ${f ? fmtDMY(f) : "…"} đến ${t ? fmtDMY(t) : "…"}`;
+      return { from: f || null, to: t || null, label };
+    }
+    default: return { from: null, to: null, label: "Tất cả thời gian" };
+  }
+}
+
+function setListMessage(text, isErr = false) {
+  const tbody = document.getElementById("list-body");
+  if (!tbody) return;
+  tbody.innerHTML = `<tr style="cursor:default"><td colspan="11" class="list-msg${isErr ? " err" : ""}">${text}</td></tr>`;
+}
+
+// Đảm bảo đã biết trạm hiện tại (đợi tối đa ~5 giây nếu đang tải)
+async function ensureTram() {
+  if (currentTram) return currentTram;
+  for (let i = 0; i < 25 && !currentTram; i++) {
+    await new Promise((r) => setTimeout(r, 200));
+  }
+  if (!currentTram) {
+    try { await loadTramConfig(); } catch (e) { console.error(e); }
+  }
+  return currentTram;
+}
 
 async function loadList() {
-  if (!currentTram) return;
-  const dateFilter = document.getElementById("filter-date").value;
+  const seq = ++loadListSeq;
+  setListMessage("Đang tải danh sách...");
+
+  const tram = await ensureTram();
+  if (seq !== loadListSeq) return;
+  if (!tram) {
+    setListMessage("⚠ Chưa xác định được trạm y tế của tài khoản này. Hãy tải lại trang hoặc đăng nhập lại.", true);
+    return;
+  }
+
+  const range = getRangeDates();
+  const summaryEl = document.getElementById("list-summary");
+  if (range.incomplete) {
+    allRows = [];
+    if (summaryEl) summaryEl.innerHTML = `<b>${range.label}</b>`;
+    setListMessage("Hãy chọn ngày bắt đầu và/hoặc ngày kết thúc để xem danh sách.");
+    return;
+  }
+
   let query = sb
     .from("tiep_don")
     .select("*")
-    .eq("tram_id", currentTram.id)
+    .eq("tram_id", tram.id)
     .order("created_at", { ascending: false });
-  if (dateFilter) {
-    // Lọc theo ngày tiếp đón dựa trên created_at (giờ địa phương VN, UTC+7)
-    const nextDay = new Date(`${dateFilter}T00:00:00+07:00`);
-    nextDay.setDate(nextDay.getDate() + 1);
-    const nextDayStr = nextDay.toISOString().slice(0, 10);
-    query = query
-      .gte("created_at", `${dateFilter}T00:00:00+07:00`)
-      .lt("created_at", `${nextDayStr}T00:00:00+07:00`);
-  }
-  const { data, error } = await query.limit(500);
+
+  // created_at là timestamptz -> so sánh theo mốc 00:00 giờ VN (+07:00)
+  if (range.from) query = query.gte("created_at", `${range.from}T00:00:00+07:00`);
+  if (range.to) query = query.lt("created_at", `${addDaysStr(range.to, 1)}T00:00:00+07:00`);
+
+  const { data, error } = await query.limit(2000);
+  if (seq !== loadListSeq) return; // đã có lần lọc mới hơn
   if (error) {
-    console.error(error);
+    console.error("Lỗi tải danh sách:", error);
+    setListMessage(`✗ Không tải được danh sách: ${error.message || "lỗi không xác định"}`, true);
     return;
   }
-  allRows = data;
+  allRows = data || [];
   renderList();
+}
+
+function escapeHtml(v) {
+  return String(v ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 }
 
 function renderList() {
   const term = document.getElementById("search-box").value.trim().toLowerCase();
   const tbody = document.getElementById("list-body");
+  const summaryEl = document.getElementById("list-summary");
   tbody.innerHTML = "";
 
   let rows = allRows.filter((r) => (hideExported ? !r.da_nhap_v20 : true));
@@ -1015,23 +1106,45 @@ function renderList() {
     );
   }
 
+  const range = getRangeDates();
+  const total = allRows.length;
+  const done = allRows.filter((r) => r.da_nhap_v20).length;
+  if (summaryEl) {
+    summaryEl.innerHTML =
+      `<b>${range.label}</b> — đã quét <b>${total}</b> người, đã bàn giao V20 <b>${done}</b>, ` +
+      `chưa bàn giao <b>${total - done}</b> · đang hiển thị <b>${rows.length}</b>`;
+  }
+
+  if (!rows.length) {
+    const hiddenCount = allRows.length - rows.length;
+    let msg = "Không có ai được quét trong khoảng thời gian này.";
+    if (allRows.length && hideExported && !term) msg = `Tất cả ${allRows.length} người đã bàn giao V20 (đang được ẩn). Bỏ tích “Ẩn những người đã bàn giao V20” để xem lại.`;
+    else if (allRows.length && term) msg = "Không có kết quả khớp với từ khóa tìm kiếm.";
+    setListMessage(msg);
+    return;
+  }
+
   rows.forEach((r, i) => {
     const tr = document.createElement("tr");
     tr.dataset.id = r.id;
     if (r.da_nhap_v20) tr.classList.add("exported");
     const createdAt = r.created_at ? new Date(r.created_at) : null;
-    const gioText = createdAt ? createdAt.toLocaleTimeString("vi-VN", { hour12: false }).slice(0, 5) : "";
-    const ngayText = createdAt ? createdAt.toLocaleDateString("vi-VN") : "";
+    const gioText = createdAt
+      ? createdAt.toLocaleTimeString("vi-VN", { hour12: false, timeZone: "Asia/Ho_Chi_Minh" }).slice(0, 5)
+      : "";
+    const ngayText = createdAt
+      ? createdAt.toLocaleDateString("vi-VN", { timeZone: "Asia/Ho_Chi_Minh" })
+      : "";
     tr.innerHTML = `
       <td>${i + 1}</td>
       <td>${gioText}</td>
       <td>${ngayText}</td>
-      <td>${r.ho_ten || ""}</td>
+      <td>${escapeHtml(r.ho_ten)}</td>
       <td>${formatDateVN(r.ngay_sinh)}</td>
-      <td>${r.gioi || ""}</td>
-      <td class="cccd-cell">${r.cccd || ""}</td>
-      <td>${r.dia_chi || ""}</td>
-      <td>${r.nguoi_quet || ""}</td>
+      <td>${escapeHtml(r.gioi)}</td>
+      <td class="cccd-cell">${escapeHtml(r.cccd)}</td>
+      <td>${escapeHtml(r.dia_chi)}</td>
+      <td>${escapeHtml(r.nguoi_quet)}</td>
       <td>${r.da_nhap_v20 ? "✓ Đã nhập" : "—"}</td>
       <td><button type="button" class="btn-print-row" data-id="${r.id}">🖨 In phiếu</button></td>
     `;
@@ -1090,7 +1203,22 @@ async function copyRow(row, trEl) {
 }
 
 document.getElementById("search-box")?.addEventListener("input", renderList);
-document.getElementById("filter-date")?.addEventListener("change", loadList);
+document.getElementById("range-bar")?.addEventListener("click", (e) => {
+  const btn = e.target.closest(".range-btn");
+  if (!btn) return;
+  currentRange = btn.dataset.range;
+  document.querySelectorAll("#range-bar .range-btn").forEach((b) => b.classList.toggle("active", b === btn));
+  document.getElementById("range-custom")?.classList.toggle("show", currentRange === "custom");
+  if (currentRange === "custom") {
+    const fromEl = document.getElementById("filter-from");
+    const toEl = document.getElementById("filter-to");
+    if (!fromEl.value) fromEl.value = vnDateStr(-6);
+    if (!toEl.value) toEl.value = vnDateStr(0);
+  }
+  loadList();
+});
+document.getElementById("filter-from")?.addEventListener("change", loadList);
+document.getElementById("filter-to")?.addEventListener("change", loadList);
 document.getElementById("toggle-hide-exported")?.addEventListener("change", (e) => {
   hideExported = e.target.checked;
   renderList();
@@ -1147,11 +1275,7 @@ document.getElementById("nav-list")?.addEventListener("click", () => switchPage(
 document.getElementById("btn-settings")?.addEventListener("click", openSettings);
 document.getElementById("btn-close-settings")?.addEventListener("click", closeSettings);
 
-// Mặc định: mở tab danh sách với ngày hôm nay
-const today = new Date();
-const iso = today.toISOString().slice(0, 10);
-const filterDateEl = document.getElementById("filter-date");
-if (filterDateEl) filterDateEl.value = iso;
+// Mặc định: tab danh sách mở với bộ lọc "Hôm nay" (tính theo giờ Việt Nam)
 
 // ============================================================
 // CẤU HÌNH THÔNG TIN TRẠM Y TẾ (mỗi trạm tự chỉnh, không ảnh hưởng trạm khác)
