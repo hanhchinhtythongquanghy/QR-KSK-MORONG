@@ -137,6 +137,7 @@ async function loadTrams() {
   allTrams = data || [];
   renderKpis();
   renderTable();
+  loadPayments();
 }
 
 function renderKpis() {
@@ -159,13 +160,56 @@ function formatDateTimeVN(iso) {
   return new Date(iso).toLocaleString("vi-VN", { hour12: false });
 }
 
+// ---------- Lịch sử thanh toán (50 giao dịch gần nhất) ----------
+const PAY_STATUS = {
+  da_kich_hoat: ['<span class="pay-ok">✓ Đã kích hoạt</span>'],
+  admin_gia_han: ['<span class="pay-ok">✓ Admin gia hạn</span>'],
+  khong_khop_ma: ['<span class="pay-bad">✗ Không thấy mã trạm trong nội dung</span>'],
+  thieu_tien: ['<span class="pay-bad">✗ Chuyển thiếu tiền</span>'],
+};
+
+async function loadPayments() {
+  const body = document.getElementById("pay-body");
+  const emptyEl = document.getElementById("pay-empty");
+  if (!body) return;
+  const { data, error } = await sb
+    .from("thanh_toan")
+    .select("*")
+    .order("created_at", { ascending: false })
+    .limit(50);
+  if (error) {
+    console.error(error);
+    body.innerHTML = `<tr><td colspan="6" class="muted">Không tải được lịch sử thanh toán: ${error.message} (đã chạy billing.sql chưa?)</td></tr>`;
+    emptyEl.style.display = "none";
+    return;
+  }
+  const nameOf = (id) => {
+    const t = allTrams.find((x) => x.tram_id === id);
+    return t ? `<b>${t.ten_tram}</b>` : '<span class="muted">(chưa xác định)</span>';
+  };
+  body.innerHTML = (data || [])
+    .map((p) => `
+      <tr>
+        <td>${formatDateTimeVN(p.thoi_gian_ck || p.created_at)}</td>
+        <td>${nameOf(p.tram_id)}</td>
+        <td>${(p.so_tien || 0).toLocaleString("vi-VN")}đ</td>
+        <td class="mono">${(p.noi_dung || "").replace(/</g, "&lt;")}</td>
+        <td>${p.so_ngay_cong ? "+" + p.so_ngay_cong + " ngày" : "—"}</td>
+        <td>${(PAY_STATUS[p.trang_thai] || [p.trang_thai])[0]}</td>
+      </tr>`)
+    .join("");
+  emptyEl.style.display = (data || []).length ? "none" : "block";
+}
+
+document.getElementById("btn-reload-pay")?.addEventListener("click", loadPayments);
+
 function planBadge(t) {
   const fmt = (iso) => (iso ? new Date(iso).toLocaleDateString("vi-VN") : "");
   switch (t.giai_doan) {
     case "mien_phi": return '<span class="badge-active">Miễn phí</span>';
-    case "tra_phi": return `<span class="badge-active">Đã trả phí</span><br><small class="muted">đến ${fmt(t.paid_until)}</small>`;
-    case "dung_thu": return `<span class="badge-trial">Dùng thử</span><br><small class="muted">đến ${fmt(t.trial_ends_at)}</small>`;
-    case "het_han": return '<span class="badge-expired">Hết hạn</span>';
+    case "tra_phi": return `<span class="badge-active">Đã trả phí</span><br><small class="muted">đến ${fmt(t.paid_until)}</small><br><small class="mono muted">${t.ma_thanh_toan || ""}</small>`;
+    case "dung_thu": return `<span class="badge-trial">Dùng thử</span><br><small class="muted">đến ${fmt(t.trial_ends_at)}</small><br><small class="mono muted">${t.ma_thanh_toan || ""}</small>`;
+    case "het_han": return `<span class="badge-expired">Hết hạn</span><br><small class="mono muted">${t.ma_thanh_toan || ""}</small>`;
     default: return "";
   }
 }
