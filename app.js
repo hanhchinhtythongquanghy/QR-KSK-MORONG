@@ -138,6 +138,22 @@ function renderPlan() {
   planBannerEl.style.display = "flex";
 }
 
+// Tên trạm viết liền, không dấu, in hoa — gắn sau mã thanh toán để nhìn sao kê là biết trạm nào.
+// (Mã KSKxxxxxxxx luôn đứng đầu nên dù ngân hàng cắt bớt phần đuôi thì vẫn nhận diện được.)
+function makeStationSlug(name) {
+  let s = String(name || "")
+    .normalize("NFD").replace(/[\u0300-\u036f]/g, "")
+    .replace(/đ/g, "d").replace(/Đ/g, "D")
+    .toUpperCase();
+  s = s.replace(/\b(TRAM Y TE|TRUNG TAM Y TE|TYT|UBND|XA|PHUONG|THI TRAN|HUYEN|QUAN)\b/g, " ");
+  return s.replace(/[^A-Z0-9]/g, "").slice(0, 20);
+}
+
+function buildPaymentContent(code) {
+  const slug = makeStationSlug(currentTram?.ten_tram) || makeStationSlug(currentTram?.ten_xa);
+  return slug ? `${code} ${slug}` : code;
+}
+
 function buildQrUrl(plan, code, useFallback) {
   if (useFallback) {
     return `https://img.vietqr.io/image/${encodeURIComponent(plan.bankFallbackCode)}-${encodeURIComponent(plan.account)}-compact2.png` +
@@ -151,6 +167,7 @@ function openPaywall(locked) {
   const plan = window.APP_CONFIG?.PLAN;
   if (!paywallEl || !plan || !planInfo) return;
   paywallLocked = !!locked;
+  const content = buildPaymentContent(planInfo.ma_thanh_toan);
 
   document.getElementById("pw-title").textContent = locked
     ? "Đã hết hạn dùng thử — vui lòng thanh toán để tiếp tục"
@@ -164,22 +181,22 @@ function openPaywall(locked) {
   img.onerror = () => {
     if (!triedFallback) {
       triedFallback = true;
-      img.src = buildQrUrl(plan, planInfo.ma_thanh_toan, true);
+      img.src = buildQrUrl(plan, content, true);
     }
   };
-  img.src = buildQrUrl(plan, planInfo.ma_thanh_toan, false);
+  img.src = buildQrUrl(plan, content, false);
 
   document.getElementById("pw-bank").textContent = plan.bank;
   document.getElementById("pw-account").textContent = plan.account;
   document.getElementById("pw-amount").textContent = fmtMoney(plan.price);
   document.getElementById("pw-amount").dataset.raw = String(plan.price);
-  document.getElementById("pw-code").textContent = planInfo.ma_thanh_toan;
+  document.getElementById("pw-code").textContent = content;
   const nameRow = document.getElementById("pw-name-row");
   nameRow.style.display = plan.accountName ? "" : "none";
   document.getElementById("pw-name").textContent = plan.accountName || "";
   document.getElementById("pw-note").textContent =
     `Mỗi ${fmtMoney(plan.price)} = ${plan.days} ngày sử dụng. Giữ nguyên nội dung chuyển khoản ` +
-    `“${planInfo.ma_thanh_toan}” (không sửa, không thêm) để hệ thống tự nhận diện đúng trạm. ` +
+    `“${content}” (không sửa, không thêm) để hệ thống tự nhận diện đúng trạm. ` +
     `Nếu quá 5 phút chưa được kích hoạt, hãy liên hệ quản trị hệ thống.`;
 
   document.getElementById("pw-close").style.display = locked ? "none" : "";
