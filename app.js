@@ -151,16 +151,21 @@ function makeStationSlug(name) {
 
 function buildPaymentContent(code) {
   const slug = makeStationSlug(currentTram?.ten_tram) || makeStationSlug(currentTram?.ten_xa);
-  return slug ? `${code} ${slug}` : code;
+  // VietinBank (tài khoản cá nhân/hộ kinh doanh) chỉ báo giao dịch về SePay khi nội dung BẮT ĐẦU bằng SEVQR
+  const base = `SEVQR ${code}`;
+  return slug ? `${base} ${slug}` : base;
 }
 
-function buildQrUrl(plan, code, useFallback) {
-  if (useFallback) {
-    return `https://img.vietqr.io/image/${encodeURIComponent(plan.bankFallbackCode)}-${encodeURIComponent(plan.account)}-compact2.png` +
-      `?amount=${plan.price}&addInfo=${encodeURIComponent(code)}`;
+function buildQrUrl(plan, content, attempt) {
+  const acc = encodeURIComponent(plan.account);
+  const des = encodeURIComponent(content);
+  if (attempt === 0) {
+    return `https://vietqr.app/img?acc=${acc}&bank=${encodeURIComponent(plan.bank)}&amount=${plan.price}&des=${des}`;
   }
-  return `https://qr.sepay.vn/img?acc=${encodeURIComponent(plan.account)}&bank=${encodeURIComponent(plan.bank)}` +
-    `&amount=${plan.price}&des=${encodeURIComponent(code)}&template=compact`;
+  if (attempt === 1) {
+    return `https://qr.sepay.vn/img?acc=${acc}&bank=${encodeURIComponent(plan.bank)}&amount=${plan.price}&des=${des}&template=compact`;
+  }
+  return `https://img.vietqr.io/image/${encodeURIComponent(plan.bankFallbackCode)}-${acc}-compact2.png?amount=${plan.price}&addInfo=${des}`;
 }
 
 function openPaywall(locked) {
@@ -177,14 +182,14 @@ function openPaywall(locked) {
     : `Gói hiện tại còn hiệu lực đến hết ${fmtVnDate(planInfo.han_dung)}. Thanh toán thêm sẽ được cộng nối tiếp vào thời hạn hiện có.`;
 
   const img = document.getElementById("pw-qr-img");
-  let triedFallback = false;
+  let qrAttempt = 0;
   img.onerror = () => {
-    if (!triedFallback) {
-      triedFallback = true;
-      img.src = buildQrUrl(plan, content, true);
+    if (qrAttempt < 2) {
+      qrAttempt++;
+      img.src = buildQrUrl(plan, content, qrAttempt);
     }
   };
-  img.src = buildQrUrl(plan, content, false);
+  img.src = buildQrUrl(plan, content, 0);
 
   document.getElementById("pw-bank").textContent = plan.bank;
   document.getElementById("pw-account").textContent = plan.account;
@@ -195,9 +200,17 @@ function openPaywall(locked) {
   nameRow.style.display = plan.accountName ? "" : "none";
   document.getElementById("pw-name").textContent = plan.accountName || "";
   document.getElementById("pw-note").textContent =
-    `Mỗi ${fmtMoney(plan.price)} = ${plan.days} ngày sử dụng. Giữ nguyên nội dung chuyển khoản ` +
-    `“${content}” (không sửa, không thêm) để hệ thống tự nhận diện đúng trạm. ` +
+    `Mỗi ${fmtMoney(plan.price)} = ${plan.days} ngày sử dụng. Quét mã QR để nội dung được điền sẵn; nếu nhập tay, ` +
+    `hãy giữ nguyên toàn bộ “${content}” — phải bắt đầu bằng SEVQR (không sửa, không thêm) để hệ thống tự nhận đúng trạm. ` +
     `Nếu quá 5 phút chưa được kích hoạt, hãy liên hệ quản trị hệ thống.`;
+  const waitEl = document.getElementById("pw-wait");
+  waitEl.textContent = "⏳ Đang chờ thanh toán — hệ thống tự kích hoạt sau vài giây khi nhận được tiền";
+  clearTimeout(window.__pwHintTimer);
+  window.__pwHintTimer = setTimeout(() => {
+    if (paywallEl.classList.contains("show")) {
+      waitEl.textContent = "⚠ Chưa nhận được xác nhận. Hãy kiểm tra giao dịch đã hoàn tất, đúng số tiền và nội dung chuyển khoản còn nguyên chữ SEVQR.";
+    }
+  }, 90000);
 
   document.getElementById("pw-close").style.display = locked ? "none" : "";
   paywallEl.classList.add("show");
