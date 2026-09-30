@@ -20,6 +20,17 @@ function parseVnTime(s) {
 }
 
 module.exports = async (req, res) => {
+  if (req.method === "GET") {
+    // Mở thẳng URL này trên trình duyệt để kiểm tra nhanh máy chủ đã nhận đủ biến môi trường chưa
+    res.status(200).json({
+      ok: true,
+      endpoint: "sepay-webhook",
+      has_SEPAY_API_KEY: !!process.env.SEPAY_API_KEY,
+      has_SUPABASE_URL: !!process.env.SUPABASE_URL,
+      has_SUPABASE_SERVICE_ROLE_KEY: !!process.env.SUPABASE_SERVICE_ROLE_KEY,
+    });
+    return;
+  }
   if (req.method !== "POST") {
     res.status(405).json({ success: false, message: "Method not allowed" });
     return;
@@ -46,10 +57,12 @@ module.exports = async (req, res) => {
       res.status(200).json({ success: true, message: "Bỏ qua: không phải tiền vào" });
       return;
     }
-    if (b.accountNumber && String(b.accountNumber) !== plan.account) {
-      res.status(200).json({ success: true, message: "Bỏ qua: khác tài khoản nhận" });
-      return;
-    }
+    // Không chặn theo số tài khoản: SePay có thể gửi số tài khoản định danh (VA) khác số hiển thị.
+    // Nguồn gọi đã được xác thực bằng API key ở trên.
+    console.log("sepay-webhook nhận:", JSON.stringify({
+      id: b.id, acc: b.accountNumber, sub: b.subAccount, amount: b.transferAmount,
+      content: b.content, code: b.code,
+    }));
 
     const sepayId = Number(b.id);
     if (!Number.isFinite(sepayId)) {
@@ -63,8 +76,10 @@ module.exports = async (req, res) => {
     });
 
     // Tìm mã thanh toán trong nội dung (ngân hàng có thể thêm chữ trước/sau, đổi hoa/thường)
-    const text = `${b.code || ""} ${b.content || ""} ${b.description || ""}`.toUpperCase();
-    const m = text.match(new RegExp(`${plan.prefix}[0-9A-F]{8}`));
+    const raw = `${b.code || ""} ${b.content || ""} ${b.description || ""}`.toUpperCase();
+    const re = new RegExp(`${plan.prefix}[0-9A-F]{8}`);
+    // Thử nguyên văn trước, rồi thử sau khi bỏ mọi ký tự không phải chữ/số (vd "KSK 1A2B-3C4D")
+    const m = raw.match(re) || raw.replace(/[^0-9A-Z]/g, "").match(re);
 
     let tram = null;
     if (m) {
@@ -115,7 +130,8 @@ module.exports = async (req, res) => {
       }
     }
 
-    res.status(200).json({ success: true, status });
+    console.log("sepay-webhook kết quả:", status, tram ? tram.id : null, days);
+    res.status(200).json({ success: true, status, tram_found: !!tram, days });
   } catch (err) {
     console.error("sepay-webhook lỗi:", err);
     res.status(500).json({ success: false, message: err.message });
