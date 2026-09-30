@@ -283,6 +283,48 @@
   }
   .btn-print-row:hover { background: #eef3f8; border-color: var(--navy); }
 
+
+  /* ---------- Gói dịch vụ: banner + màn hình thanh toán ---------- */
+  #plan-banner {
+    display: none; align-items: center; justify-content: center; gap: 12px; flex-wrap: wrap;
+    padding: 8px 16px; font-size: 13px; background: #e8f1fb; color: var(--navy); border-bottom: 1px solid #c9dcf0;
+  }
+  #plan-banner.warn { background: #fff4dc; color: #7a5a00; border-bottom-color: #f0d9a0; }
+  #plan-banner button {
+    background: var(--navy); color: #fff; border: none; border-radius: 5px; padding: 5px 12px;
+    font-size: 12.5px; font-weight: 600; cursor: pointer;
+  }
+  #paywall {
+    display: none; position: fixed; inset: 0; z-index: 9999; background: rgba(20,41,60,.86);
+    align-items: center; justify-content: center; padding: 16px; overflow-y: auto;
+  }
+  #paywall.show { display: flex; }
+  .pw-box {
+    position: relative; background: #fff; border-radius: 12px; width: 100%; max-width: 720px;
+    padding: 24px 26px; box-shadow: 0 12px 40px rgba(0,0,0,.35); margin: auto;
+  }
+  .pw-close { position: absolute; top: 10px; right: 12px; border: none; background: none; font-size: 22px; cursor: pointer; color: var(--muted); }
+  .pw-box h2 { margin: 0 0 6px; color: var(--navy-dark); font-size: 20px; }
+  .pw-sub { margin: 0 0 16px; color: var(--muted); font-size: 14px; }
+  .pw-body { display: flex; gap: 22px; align-items: flex-start; }
+  .pw-qr { flex: 0 0 240px; text-align: center; }
+  .pw-qr img { width: 240px; height: 240px; object-fit: contain; border: 1px solid var(--border); border-radius: 8px; background: #fff; }
+  .pw-wait { margin-top: 8px; font-size: 12.5px; color: var(--muted); }
+  .pw-info { flex: 1; min-width: 0; }
+  .pw-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 8px 0; border-bottom: 1px solid var(--border); font-size: 14px; }
+  .pw-row span.k { color: var(--muted); font-size: 12.5px; flex: 0 0 96px; }
+  .pw-row b { flex: 1; word-break: break-all; color: var(--navy-dark); }
+  .pw-row.key b { color: #c0392b; font-size: 16px; letter-spacing: .04em; }
+  .pw-copy { border: 1px solid var(--border); background: #fff; border-radius: 5px; padding: 3px 9px; font-size: 12px; cursor: pointer; color: var(--navy); }
+  .pw-note { margin: 14px 0 4px; font-size: 12.5px; color: var(--muted); line-height: 1.5; }
+  .pw-actions { display: flex; gap: 8px; margin-top: 14px; flex-wrap: wrap; }
+  @media (max-width: 640px) {
+    .pw-box { padding: 20px 16px; }
+    .pw-body { flex-direction: column; align-items: stretch; }
+    .pw-qr { flex: none; }
+    .pw-qr img { width: 100%; max-width: 280px; height: auto; aspect-ratio: 1; }
+  }
+
   /* ============================================================
      MẪU IN - chỉ khu vực này hiển thị khi in
      Khớp định dạng file gốc "18+.docx":
@@ -482,6 +524,11 @@
     <button class="nav-btn" id="btn-logout" title="Đăng xuất">⏻ Đăng xuất</button>
   </nav>
 </header>
+
+<div id="plan-banner">
+  <span id="plan-banner-text"></span>
+  <button type="button" id="plan-banner-btn">Gia hạn / Thanh toán</button>
+</div>
 
 <main>
 
@@ -756,6 +803,33 @@
       </tr>
     </tbody>
   </table>
+</div>
+
+<!-- ============ MÀN HÌNH THANH TOÁN / GIA HẠN (SePay) ============ -->
+<div id="paywall">
+  <div class="pw-box">
+    <button type="button" class="pw-close" id="pw-close" title="Đóng">✕</button>
+    <h2 id="pw-title">Thanh toán để tiếp tục sử dụng</h2>
+    <p class="pw-sub" id="pw-sub"></p>
+    <div class="pw-body">
+      <div class="pw-qr">
+        <img id="pw-qr-img" alt="Mã QR chuyển khoản" />
+        <div class="pw-wait" id="pw-wait">⏳ Đang chờ thanh toán — hệ thống tự kích hoạt sau vài giây khi nhận được tiền</div>
+      </div>
+      <div class="pw-info">
+        <div class="pw-row"><span class="k">Ngân hàng</span><b id="pw-bank"></b></div>
+        <div class="pw-row"><span class="k">Số tài khoản</span><b id="pw-account"></b><button type="button" class="pw-copy" data-copy="pw-account">Sao chép</button></div>
+        <div class="pw-row" id="pw-name-row" style="display:none"><span class="k">Chủ tài khoản</span><b id="pw-name"></b></div>
+        <div class="pw-row"><span class="k">Số tiền</span><b id="pw-amount"></b><button type="button" class="pw-copy" data-copy="pw-amount-raw">Sao chép</button></div>
+        <div class="pw-row key"><span class="k">Nội dung CK</span><b id="pw-code"></b><button type="button" class="pw-copy" data-copy="pw-code">Sao chép</button></div>
+      </div>
+    </div>
+    <div class="pw-note" id="pw-note"></div>
+    <div class="pw-actions">
+      <button type="button" class="btn" id="pw-check">Tôi đã chuyển khoản — kiểm tra ngay</button>
+      <button type="button" class="btn secondary" id="pw-logout">Đăng xuất</button>
+    </div>
+  </div>
 </div>
 
 <script src="app.js"></script>

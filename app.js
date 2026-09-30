@@ -58,6 +58,196 @@ function applyTramConfig() {
 }
 
 // ============================================================
+// GÓI DỊCH VỤ: DÙNG THỬ 7 NGÀY -> HẾT HẠN THÌ TẠM DỪNG, THANH TOÁN QUA SEPAY
+// - Trạng thái gói lấy từ Supabase (rpc goi_dich_vu) nên không sửa được ở máy khách;
+//   ngoài ra RLS trên CSDL cũng chặn thêm/sửa tiếp đón khi hết hạn.
+// - Mã QR tự sinh (qr.sepay.vn) kèm nội dung chuyển khoản riêng của từng trạm;
+//   SePay báo về /api/sepay-webhook -> gói tự kích hoạt, màn hình tự mở khóa.
+// ============================================================
+let planInfo = null;
+let planWatchTimer = null;
+let paywallPollTimer = null;
+let paywallLocked = false;
+
+const paywallEl = document.getElementById("paywall");
+const planBannerEl = document.getElementById("plan-banner");
+
+function fmtVnDate(iso) {
+  return iso ? new Date(iso).toLocaleDateString("vi-VN", { timeZone: "Asia/Ho_Chi_Minh" }) : "";
+}
+
+function fmtMoney(n) {
+  return Number(n || 0).toLocaleString("vi-VN") + "đ";
+}
+
+async function refreshPlan() {
+  if (!currentTram) return null;
+  const { data, error } = await sb.rpc("goi_dich_vu");
+  if (error || !data) {
+    // Chưa chạy billing.sql hoặc lỗi mạng: không khóa nhầm (CSDL vẫn tự chặn khi hết hạn)
+    console.error("Không đọc được gói dịch vụ:", error);
+    return null;
+  }
+  const wasLocked = paywallLocked;
+  const prevHan = planInfo ? new Date(planInfo.han_dung).getTime() : null;
+  const wasOpen = paywallEl?.classList.contains("show");
+  planInfo = data;
+  renderPlan();
+  const extended = prevHan !== null && new Date(data.han_dung).getTime() > prevHan;
+  if (wasLocked && data.giai_doan !== "het_han") {
+    showToast?.("✓ Đã kích hoạt gói thành công. Cảm ơn bạn!", "ok");
+  } else if (wasOpen && extended) {
+    closePaywall(); // đang mở màn hình gia hạn (chưa hết hạn) và vừa nhận được tiền
+    showToast?.("✓ Đã gia hạn thành công. Cảm ơn bạn!", "ok");
+  }
+  return data;
+}
+
+function renderPlan() {
+  if (!planInfo) return;
+  const p = planInfo;
+  const days = Math.ceil((p.giay_con_lai || 0) / 86400);
+
+  if (p.giai_doan === "het_han") {
+    planBannerEl.style.display = "none";
+    // Chỉ dựng lại khi chưa hiện (tránh nạp lại mã QR mỗi 5 giây khi đang chờ thanh toán)
+    if (!paywallLocked || !paywallEl.classList.contains("show")) openPaywall(true);
+    return;
+  }
+
+  // Còn hạn: nếu đang mở màn hình khóa thì đóng lại
+  if (paywallLocked) {
+    paywallLocked = false;
+    closePaywall();
+  }
+
+  if (p.giai_doan === "mien_phi") {
+    planBannerEl.style.display = "none";
+    return;
+  }
+
+  const warn = days <= (p.giai_doan === "dung_thu" ? 3 : 7);
+  if (p.giai_doan === "tra_phi" && !warn) {
+    planBannerEl.style.display = "none"; // gói đã trả phí và còn dài: không làm phiền
+    return;
+  }
+  const label = p.giai_doan === "dung_thu" ? "Đang dùng thử miễn phí" : "Gói đang hoạt động";
+  document.getElementById("plan-banner-text").textContent =
+    `${label} — còn ${days} ngày (đến hết ${fmtVnDate(p.han_dung)})`;
+  planBannerEl.classList.toggle("warn", warn);
+  planBannerEl.style.display = "flex";
+}
+
+function buildQrUrl(plan, code, useFallback) {
+  if (useFallback) {
+    return `https://img.vietqr.io/image/${encodeURIComponent(plan.bankFallbackCode)}-${encodeURIComponent(plan.account)}-compact2.png` +
+      `?amount=${plan.price}&addInfo=${encodeURIComponent(code)}`;
+  }
+  return `https://qr.sepay.vn/img?acc=${encodeURIComponent(plan.account)}&bank=${encodeURIComponent(plan.bank)}` +
+    `&amount=${plan.price}&des=${encodeURIComponent(code)}&template=compact`;
+}
+
+function openPaywall(locked) {
+  const plan = window.APP_CONFIG?.PLAN;
+  if (!paywallEl || !plan || !planInfo) return;
+  paywallLocked = !!locked;
+
+  document.getElementById("pw-title").textContent = locked
+    ? "Đã hết hạn dùng thử — vui lòng thanh toán để tiếp tục"
+    : "Gia hạn gói sử dụng";
+  document.getElementById("pw-sub").textContent = locked
+    ? "Phần mềm đang tạm dừng. Quét mã QR bên dưới bằng ứng dụng ngân hàng; sau khi nhận được tiền, phần mềm tự mở lại."
+    : `Gói hiện tại còn hiệu lực đến hết ${fmtVnDate(planInfo.han_dung)}. Thanh toán thêm sẽ được cộng nối tiếp vào thời hạn hiện có.`;
+
+  const img = document.getElementById("pw-qr-img");
+  let triedFallback = false;
+  img.onerror = () => {
+    if (!triedFallback) {
+      triedFallback = true;
+      img.src = buildQrUrl(plan, planInfo.ma_thanh_toan, true);
+    }
+  };
+  img.src = buildQrUrl(plan, planInfo.ma_thanh_toan, false);
+
+  document.getElementById("pw-bank").textContent = plan.bank;
+  document.getElementById("pw-account").textContent = plan.account;
+  document.getElementById("pw-amount").textContent = fmtMoney(plan.price);
+  document.getElementById("pw-amount").dataset.raw = String(plan.price);
+  document.getElementById("pw-code").textContent = planInfo.ma_thanh_toan;
+  const nameRow = document.getElementById("pw-name-row");
+  nameRow.style.display = plan.accountName ? "" : "none";
+  document.getElementById("pw-name").textContent = plan.accountName || "";
+  document.getElementById("pw-note").textContent =
+    `Mỗi ${fmtMoney(plan.price)} = ${plan.days} ngày sử dụng. Giữ nguyên nội dung chuyển khoản ` +
+    `“${planInfo.ma_thanh_toan}” (không sửa, không thêm) để hệ thống tự nhận diện đúng trạm. ` +
+    `Nếu quá 5 phút chưa được kích hoạt, hãy liên hệ quản trị hệ thống.`;
+
+  document.getElementById("pw-close").style.display = locked ? "none" : "";
+  paywallEl.classList.add("show");
+
+  // Trong lúc mở: hỏi máy chủ mỗi 5 giây xem đã thanh toán xong chưa
+  clearInterval(paywallPollTimer);
+  paywallPollTimer = setInterval(refreshPlan, 5000);
+}
+
+function closePaywall() {
+  paywallEl?.classList.remove("show");
+  clearInterval(paywallPollTimer);
+  paywallPollTimer = null;
+}
+
+function hidePlanUi() {
+  paywallLocked = false;
+  closePaywall();
+  if (planBannerEl) planBannerEl.style.display = "none";
+}
+
+function startPlanWatch() {
+  clearInterval(planWatchTimer);
+  planWatchTimer = setInterval(refreshPlan, 60000); // kiểm tra định kỳ mỗi phút
+}
+
+function stopPlanWatch() {
+  clearInterval(planWatchTimer);
+  planWatchTimer = null;
+  planInfo = null;
+}
+
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState === "visible" && currentTram) refreshPlan();
+});
+document.getElementById("plan-banner-btn")?.addEventListener("click", () => openPaywall(false));
+document.getElementById("pw-close")?.addEventListener("click", () => { if (!paywallLocked) closePaywall(); });
+document.getElementById("pw-check")?.addEventListener("click", async (e) => {
+  const btn = e.currentTarget;
+  btn.disabled = true;
+  const old = btn.textContent;
+  btn.textContent = "Đang kiểm tra...";
+  const d = await refreshPlan();
+  btn.disabled = false;
+  btn.textContent = old;
+  if (d && d.giai_doan === "het_han") {
+    showToast?.("Chưa nhận được thanh toán. Vui lòng đợi thêm ít phút rồi kiểm tra lại.", "err");
+  }
+});
+document.getElementById("pw-logout")?.addEventListener("click", async () => {
+  await sb.auth.signOut();
+});
+paywallEl?.addEventListener("click", async (e) => {
+  const btn = e.target.closest(".pw-copy");
+  if (!btn) return;
+  const src = btn.dataset.copy === "pw-amount-raw"
+    ? document.getElementById("pw-amount").dataset.raw
+    : document.getElementById(btn.dataset.copy).textContent;
+  try {
+    await navigator.clipboard.writeText(src);
+    const old = btn.textContent;
+    btn.textContent = "Đã chép ✓";
+    setTimeout(() => (btn.textContent = old), 1500);
+  } catch { /* trình duyệt không cho copy */ }
+});
+
+// ============================================================
 // ĐĂNG NHẬP (mỗi trạm y tế có 1 tài khoản riêng, dùng Supabase Auth;
 // tài khoản đó được gán sẵn vào đúng trạm của mình trong bảng profiles)
 // ============================================================
@@ -72,6 +262,10 @@ async function showApp() {
   if (loginScreenEl) loginScreenEl.style.display = "none";
   if (appShellEl) appShellEl.style.display = "";
   await loadTramConfig();
+  if (currentTram) {
+    await refreshPlan();
+    startPlanWatch();
+  }
   if (currentTram && document.getElementById("page-list")?.classList.contains("active")) loadList();
 }
 
@@ -80,6 +274,8 @@ function showLogin() {
   if (loginScreenEl) loginScreenEl.style.display = "flex";
   currentTram = null;
   unsubscribeRealtime();
+  stopPlanWatch();
+  hidePlanUi();
 }
 
 // Kiểm tra session ngay khi tải trang — nếu máy đã đăng nhập trước đó
@@ -405,6 +601,10 @@ async function handleScan(raw) {
   const { error } = await sb.from("tiep_don").insert(row);
   if (error) {
     console.error(error);
+    if (error.code === "42501") {
+      // Bị CSDL từ chối vì hết hạn dùng thử -> kiểm tra lại gói và hiện màn hình thanh toán
+      refreshPlan();
+    }
     setSaveStatus("✗ Lỗi lưu dữ liệu, kiểm tra lại kết nối!", "err");
     showToast(`✗ Lỗi lưu dữ liệu: ${data.hoTen}`, "err");
   } else {
@@ -1193,7 +1393,10 @@ async function copyRow(row, trEl) {
     .update({ da_nhap_v20: true, thoi_gian_nhap_v20: new Date().toISOString() })
     .eq("id", row.id);
 
-  if (error) console.error(error);
+  if (error) {
+    console.error(error);
+    if (error.code === "42501") refreshPlan();
+  }
 
   setTimeout(() => {
     row.da_nhap_v20 = true;

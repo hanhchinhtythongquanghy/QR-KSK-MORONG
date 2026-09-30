@@ -6,7 +6,7 @@ Dự án là site tĩnh (không cần build) + hàm serverless trong `api/`.
 
 ## 1) Chuẩn bị Supabase
 
-1. Vào **SQL Editor**, chạy lần lượt `schema.sql` rồi `admin.sql`.
+1. Vào **SQL Editor**, chạy lần lượt `schema.sql`, `admin.sql` rồi `billing.sql` (dùng thử 7 ngày + thanh toán).
 2. Lấy 3 giá trị ở **Project Settings > API**:
    - `Project URL` → `SUPABASE_URL`
    - `anon public` → `SUPABASE_ANON_KEY`
@@ -69,6 +69,21 @@ Biến chỉ có hiệu lực cho lần deploy **sau** khi thêm/sửa, nên c�
 
 Sửa code → `git push` → Vercel tự deploy. Đổi khóa Supabase → sửa `.env`,
 chạy lại script (hoặc sửa trên dashboard) → Redeploy.
+
+## Thanh toán SePay (dùng thử 7 ngày → 200.000đ)
+
+- Mỗi trạm được 7 ngày dùng thử. Hết hạn, phần mềm tự khóa và hiện mã QR chuyển
+  khoản tới Vietinbank **101868077303** với số tiền `PLAN_PRICE` (mặc định 200.000đ)
+  và nội dung riêng của trạm (dạng `KSKxxxxxxxx`). Mỗi 200.000đ = `PLAN_DAYS` ngày (mặc định 30).
+- Cách bật:
+  1. Đăng ký SePay, **liên kết tài khoản Vietinbank 101868077303** trong SePay.
+  2. Trong `.env` đặt `SEPAY_API_KEY` = một chuỗi bí mật bạn tự đặt, đẩy lên Vercel rồi Redeploy.
+  3. SePay > **Tích hợp Webhooks > Thêm webhooks**: URL `https://<tên-miền-vercel>/api/sepay-webhook`,
+     kiểu chứng thực **API Key** (điền đúng chuỗi ở bước 2), sự kiện: **có tiền vào**.
+  4. Thử: chuyển khoản 200.000đ với nội dung là mã của trạm hết hạn → vài giây sau phần mềm tự mở lại.
+- Chuyển sai nội dung / thiếu tiền: giao dịch vẫn được ghi ở bảng `thanh_toan`
+  (cột `trang_thai`); vào trang admin bấm **Gia hạn** ở trạm tương ứng để xử lý tay.
+- Trạm muốn miễn phí vĩnh viễn: SQL Editor chạy `update tram_y_te set mien_phi = true where id = '<id>';`
 
 ## Lưu ý bảo mật
 

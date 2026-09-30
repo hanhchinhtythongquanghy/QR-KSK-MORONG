@@ -17,6 +17,7 @@ window.APP_CONFIG_READY = (async () => {
     window.APP_CONFIG = {
       SUPABASE_URL: cfg.supabaseUrl,
       SUPABASE_ANON_KEY: cfg.supabaseAnonKey,
+      PLAN: cfg.plan || null,
     };
   } catch (err) {
     console.error("Không tải được cấu hình hệ thống:", err);

@@ -159,6 +159,35 @@ function formatDateTimeVN(iso) {
   return new Date(iso).toLocaleString("vi-VN", { hour12: false });
 }
 
+function planBadge(t) {
+  const fmt = (iso) => (iso ? new Date(iso).toLocaleDateString("vi-VN") : "");
+  switch (t.giai_doan) {
+    case "mien_phi": return '<span class="badge-active">Miễn phí</span>';
+    case "tra_phi": return `<span class="badge-active">Đã trả phí</span><br><small class="muted">đến ${fmt(t.paid_until)}</small>`;
+    case "dung_thu": return `<span class="badge-trial">Dùng thử</span><br><small class="muted">đến ${fmt(t.trial_ends_at)}</small>`;
+    case "het_han": return '<span class="badge-expired">Hết hạn</span>';
+    default: return "";
+  }
+}
+
+// Gia hạn thủ công (khi khách chuyển khoản sai nội dung, thỏa thuận riêng...)
+async function extendPlanFor(t) {
+  const input = window.prompt(`Gia hạn cho "${t.ten_tram}" thêm bao nhiêu ngày? (1 - 3650)\nMã thanh toán của trạm: ${t.ma_thanh_toan || ""}`, "30");
+  if (input === null) return;
+  const days = parseInt(input, 10);
+  if (!Number.isInteger(days) || days < 1 || days > 3650) {
+    showToast("Số ngày không hợp lệ", "err");
+    return;
+  }
+  try {
+    await callAdminApi("/api/admin-extend-plan", { tram_id: t.tram_id, days });
+    showToast(`Đã gia hạn ${days} ngày cho ${t.ten_tram}`);
+    await loadTrams();
+  } catch (err) {
+    showToast(err.message || "Không gia hạn được", "err");
+  }
+}
+
 function renderTable() {
   const term = document.getElementById("search-box").value.trim().toLowerCase();
   const tbody = document.getElementById("tram-table-body");
@@ -187,17 +216,20 @@ function renderTable() {
       <td>${(t.so_nhap_hom_nay ?? 0).toLocaleString("vi-VN")}</td>
       <td>${t.lan_cuoi_su_dung ? formatDateTimeVN(t.lan_cuoi_su_dung) : '<span class="muted">Chưa sử dụng</span>'}</td>
       <td>${formatDateTimeVN(t.tram_created_at)}</td>
+      <td>${planBadge(t)}</td>
       <td>${activeRecently ? '<span class="badge-active">Đang hoạt động</span>' : '<span class="badge-idle">Ít/chưa hoạt động</span>'}</td>
       <td>
         <div class="row-actions">
           <button type="button" class="btn secondary small btn-edit-tram">Sửa</button>
           <button type="button" class="btn secondary small btn-manage-accounts">Tài khoản</button>
+          <button type="button" class="btn secondary small btn-extend-plan">Gia hạn</button>
           <button type="button" class="btn danger small btn-delete-tram">Xóa</button>
         </div>
       </td>
     `;
     tr.querySelector(".btn-edit-tram").addEventListener("click", () => openTramModal(t));
     tr.querySelector(".btn-manage-accounts").addEventListener("click", () => openAccountsModal(t));
+    tr.querySelector(".btn-extend-plan").addEventListener("click", () => extendPlanFor(t));
     tr.querySelector(".btn-delete-tram").addEventListener("click", () => openDeleteModal(t));
     tbody.appendChild(tr);
   });
